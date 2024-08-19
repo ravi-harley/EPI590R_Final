@@ -1,0 +1,258 @@
+ log using op_use_full_sample${today}
+
+ use "\\olisi01-s\mjeffery_02\server opioids\person_level_2017_08_29.dta"
+ describe
+ drop tot_person_days num_op_rx total_mme ppd_mme
+ compress
+logit q_op_user i.yr##i.qrtr##i.bene_cat   i.covg_cohort  i.female i.age_cat i.raceeth i.census_division ///
+,vce(cluster optum_lab_id)
+estimates save op_user_all_full_sample${today}, replace
+
+use optum_lab_id bene_cat q_op_user tot_person_days total_mme num_op_rx if bene_cat==1 ///
+using "person_level_com20_2017_09_22.dta"
+keep if bene_cat==1 & q_op_user==1
+
+
+/* Fully adjusted versions */
+
+/* op users only */
+nbreg total_mme i.yr##i.qrtr i.covg_cohort  i.female i.age_cat i.raceeth i.census_division ///
+, irr exposure(tot_person_days) vce(cluster optum_lab_id)
+
+estimates save mme_if_user_com${today}, replace
+eststo mme_if_user_com
+*gen _esample_mme_if_user_com=e(sample)
+
+margins yr#qrtr, post
+estimates save mme_if_user_com_mfx${today}, replace
+eststo mme_if_user_com_mfx
+
+
+use person_level_samp_2017_09_15.dta 
+keep if bene_cat==2 | bene_cat==3
+drop if q_op_user==0
+drop num_op_rx q_op_user
+
+
+/* Fully adjusted versions */
+
+
+/* op users only */
+nbreg total_mme i.yr##i.qrtr##i.bene_cat i.covg_cohort  i.female i.age_cat i.raceeth i.census_division ///
+if age_cat!=99, irr  vce(cluster optum_lab_id)
+
+estimates save mme_if_user_mcr${today}, replace
+eststo mme_if_user_mcr
+
+margins yr#qrtr, over(bene_cat) post
+estimates save mme_if_user_mcr_mfx${today}, replace
+eststo mme_if_user_mcr_mfx 
+
+
+Summary stats
+import delimited Z:\opioids\annual_table_2017_09_20.txt, delimiter("|") 
+save annual_table_2017_09_20, replace
+
+label define census_division 1 "New England"  2 "Mid Atlantic" 3 "East North Central" 4 "West North Central" ///
+5 "South Atlantic"  6 "East South Central"  7 "West South Central" 8 "Mountain" 9 "Pacific" 10 "Unk/Other"
+label values census_division census_division
+
+label define raceeth 1 "W" 2 "B" 3 "H" 4 "A" 5 "U"
+label values raceeth raceeth
+
+label define bene_cat 1 "com" 2 "aged_mcr" 3 "disab_mcr"
+label values bene_cat bene_cat
+
+rename age_group age_cat
+
+label define age_cat 1 "0-18" 2 "19-34" 4 "35-44" 5 "45-54" 6 "55-64" 7 "65-74" 8 "75+" 99 "unk"
+label values age_cat age_cat
+
+label define covg_cohort 1 "pre07" 2 "beg07" 3 "rest07" 4 "beg08"  5 "rest08" 6 "beg09"  7 "rest09" 8 "beg10"  ///
+9 "rest10" 10 "beg11"  11 "rest11" 12 "beg12"  13 "rest12" 14 "beg13"  15 "rest13" 16 "beg14"  17 "rest14" ///
+18 "beg15"  19 "rest15" 20 "beg16"  21 "rest16" 101 "pre07" 102 "2007" 103 "2008" 104 "2009" 105 "2010" 106 "2011" 107 "2012" ///
+108 "2013"  109 "2014" 110 "2015" 111 "2016"
+
+label values covg_cohort covg_cohort
+
+fvset base 4 age_cat /* 35-44 */
+fvset base 1 raceeth /* White */
+save, replace
+
+log using summary_stats${today}.smcl, append
+/* TABLE 2: OPIOID USE */
+* Quarterly commercial
+use optum_lab_id bene_cat q_op_user tot_person_days total_mme if bene_cat==1 ///
+using "Z:\server opioids\person_level_samp_2017_09_15.dta"
+drop bene_cat
+
+poisson total_mme, exposure(tot_person_days) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+logit q_op_user, vce(cluster optum_lab_id) from(1.076, copy)
+margins
+
+
+clear
+use optum_lab_id bene_cat q_op_user  ///
+using "Z:\server opioids\person_level_samp_2017_09_15.dta"
+
+tab bene_cat q_op_user
+
+clear
+* Quarterly Aged MCR
+
+use optum_lab_id bene_cat q_op_user tot_person_days total_mme if bene_cat==2 ///
+using "Z:\server opioids\person_level_samp_2017_09_15.dta"
+drop bene_cat
+
+poisson total_mme, exposure(tot_person_days) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+logit q_op_user, vce(cluster optum_lab_id) from(1.076, copy)
+margins
+
+clear
+* Quarterly Disab MCR
+
+use optum_lab_id bene_cat q_op_user tot_person_days total_mme if bene_cat==3 ///
+using "Z:\server opioids\person_level_samp_2017_09_15.dta"
+drop bene_cat
+gen qtrs=tot_person_days/91.31
+gen qrtr_offset=exp(qtrs)
+poisson total_mme, exposure(tot_person_days) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+logit q_op_user, vce(cluster optum_lab_id) 
+margins
+
+logit q_op_user, offset(qrtr_offset) vce(cluster optum_lab_id) 
+margins
+
+
+clear
+
+use optum_lab_id bene_cat a_op_user days ///
+using "annual_table_2017_09_20.dta"
+
+gen yrs=days/365.25
+gen yr_offset=exp(yrs)
+tab bene_cat a_op_user, row
+
+logit a_op_user i.bene_cat, offset(yr_offset) vce(cluster optum_lab_id)
+margins bene_cat
+clear
+* Annual Com
+
+use optum_lab_id bene_cat a_op_user days total_mme num_op_rxa if bene_cat==1 ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta"
+drop bene_cat
+
+poisson total_mme if a_op_user, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+poisson num_op_rxa, exposure(day) vce(cluster optum_lab_id) from(-.5,copy)
+margins, predict(ir)
+
+
+drop num_op_rxa
+poisson total_mme  if exposure>0, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+drop total_mmea 
+logit a_op_user, vce(cluster optum_lab_id) 
+margins
+
+
+clear
+
+* Annual Aged Mcr
+
+use optum_lab_id bene_cat a_op_user days total_mme  num_op_rxa if bene_cat==2 ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta"
+drop bene_cat
+
+poisson total_mme if a_op_user, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+poisson total_mme , exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+poisson num_op_rxa , exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+logit a_op_user, vce(cluster optum_lab_id) 
+margins
+
+clear
+
+clear
+
+* Annual Disab Mcr
+
+use optum_lab_id bene_cat a_op_user days total_mme  num_op_rxa if bene_cat==3 ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta"
+drop bene_cat
+
+poisson total_mme if a_op_user, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+poisson total_mme, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+poisson num_op_rxa, exposure(day) vce(cluster optum_lab_id)
+margins, predict(ir)
+
+logit a_op_user, vce(cluster optum_lab_id) 
+margins
+
+clear
+log close
+
+
+log using summary_stats_table1${today}.smcl, append
+/* TABLE 1: Annual popn characteristics (Demographics) */
+
+use optum_lab_id bene_cata covg_cohorta census_divisiona femalea age_cat raceetha  ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta"
+
+proportion age_cat raceetha femalea census_divisiona if bene_cat==1, citype(normal) 
+proportion age_cat raceetha femalea census_divisiona if bene_cat==2, citype(normal) cluster(optum_lab_id)
+proportion age_cat raceetha femalea census_divisiona if bene_cat==3, citype(normal)  cluster(optum_lab_id)
+
+
+/* Annual use rate by characteristics */
+*AGED MCR
+use optum_lab_id bene_cata census_divisiona femalea age_cat raceetha ///
+a_op_user num_op_rxa total_mmea ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta" if bene_cata==2 
+
+proportion a_op_user, over(age_cat) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(raceetha) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(femalea) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(census_divisiona) citype(normal) cluster(optum_lab_id)
+
+clear
+
+*Disabled MCR
+use optum_lab_id bene_cata census_divisiona femalea age_cat raceetha ///
+a_op_user num_op_rxa total_mmea ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta" if bene_cata==3
+
+proportion a_op_user, over(age_cat) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(raceetha) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(femalea) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(census_divisiona) citype(normal) cluster(optum_lab_id)
+
+clear
+
+*COM
+use optum_lab_id bene_cata census_divisiona femalea age_cat raceetha ///
+a_op_user num_op_rxa total_mmea ///
+using "C:\Users\mjeffery\Documents\Opioids\annual_table_2017_09_20.dta" if bene_cata==1
+
+proportion a_op_user, over(age_cat) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(raceetha) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(femalea) citype(normal) cluster(optum_lab_id)
+proportion a_op_user, over(census_divisiona) citype(normal) cluster(optum_lab_id)
+
